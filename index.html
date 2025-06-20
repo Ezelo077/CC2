@@ -4,71 +4,105 @@
   <meta charset="utf-8" />
   <title>VR Cube Game</title>
   <link rel="icon" href="data:;base64,=">
+
+  <!-- A-Frame + Environment + Physics (Physics-System v3.3.0) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@3.3.0/dist/aframe-physics-system.min.js"></script>
 </head>
 <body>
-  <a-scene vr-mode-ui="enabled: true" physics="debug: false">
-    <!-- ... rig, cursor, HUD exakt wie vorher ... -->
+  <!-- renderer-Attribut unterdrückt useLegacyLights-Warnung -->
+  <a-scene vr-mode-ui="enabled: true" physics="debug: false"
+           renderer="physicallyCorrectLights: true">
+    <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
+      <a-entity camera look-controls wasd-controls>
+        <a-cursor fuse="false" material="color:white;shader:flat"
+                  raycaster="objects: .spawned"></a-cursor>
+        <a-entity position="0 0 -1.5">
+          <a-plane id="progressBar" height="0.05" width="0.001"
+                   color="#00FF00" position="0 -0.1 0" visible="false"></a-plane>
+          <a-text id="scoreText" value="Punkte: 0"
+                  color="#000" align="right" anchor="right" width="2"
+                  position="2.7 -1 0"></a-text>
+        </a-entity>
+      </a-entity>
+    </a-entity>
+
+    <a-entity environment="preset:forest"></a-entity>
+    <a-light type="ambient" color="#445451"></a-light>
+    <a-light type="point" intensity="2" position="2 4 4"></a-light>
   </a-scene>
+
   <div id="info-display"></div>
+
   <script>
-    // Spawn-Hilfsfunktionen (unverändert)
-    // teleport-on-hover (unverändert)
+    // ——————————————————————————————————————————————
+    // 1) teleport-on-hover (unverändert)
+    // ——————————————————————————————————————————————
+    AFRAME.registerComponent('teleport-on-hover',{ init:function(){
+      /* ... dein bisheriger Component-Code ... */
+    }});
 
-    // WebSocket–Setup
-    const socket = new WebSocket('wss://nosch.uber.space/web-rooms/');
-    let clientId = null, clientCount = 0, score = 0;
-
-    function sendRequest(...msg){ socket.send(JSON.stringify(msg)); }
-
-    // 1) Beim Open: ins Room einsteigen und initialen State anfordern
-    socket.addEventListener('open', () => {
-      sendRequest('*enter-room*','hello-world');
-      sendRequest('*subscribe-client-count*');
-      // eigene Anfrage an den Server, der den aktuellen State liefert
-      sendRequest('request-initial-cubes');
-    });
-
-    // 2) Auf alle Nachrichten reagieren
-    socket.addEventListener('message', evt => {
-      const [ cmd, payload ] = JSON.parse(evt.data||'[]');
-      switch(cmd){
-        case '*client-id*':
-          clientId = payload;
-          document.getElementById('info-display').innerText = `#ID ${clientId}`;
-          break;
-
-        case '*client-count*':
-          clientCount = payload;
-          break;
-
-        // a) Wenn der Server uns den initialen oder aktualisierten State schickt:
-        case 'spawn-cubes':
-          // payload = Array von {x,y,z}
-          spawnCubesAt(payload);
-          break;
-
-        // b) Wenn ein Würfel eingesammelt wurde, ignorieren wir es, 
-        //    denn das führt der Server ja aus und broadcastet dann 'spawn-cubes'.
-        case 'collect-cube':
-          // (könnte Logging sein, muss nicht reagieren)
-          console.log('collect-cube event (server hatte es bekommen)');
-          break;
-      }
-    });
-
-    // 3) Klick auf einen Würfel: nur noch ans Backend senden
-    //    (kein client-side reposition mehr)
-    function setupClickHandlers(boxEl, idx){
-      boxEl.addEventListener('click', () => {
-        sendRequest('collect-cube', idx);
+    // ——————————————————————————————————————————————
+    // 2) Spawn-Hilfsfunktionen (unverändert)
+    // ——————————————————————————————————————————————
+    const numCubes=3, minDistOthers=3, minDistCam=3, camPos={x:0,y:1.6,z:0};
+    function getRandomPosition(){ return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 }; }
+    function isFarEnough(p,arr){
+      if(Math.hypot(p.x-camPos.x,p.y-camPos.y,p.z-camPos.z)<minDistCam) return false;
+      return arr.every(o=>Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z)>=minDistOthers);
+    }
+    function spawnCubesAt(positions){
+      const scene=document.querySelector('a-scene');
+      document.querySelectorAll('a-box.spawned').forEach(el=>el.remove());
+      positions.forEach((pos,i)=>{
+        const box=document.createElement('a-box');
+        box.classList.add('spawned');
+        box.setAttribute('teleport-on-hover','');
+        box.setAttribute('scale','0.3 0.3 0.3');
+        box.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
+        box.addEventListener('click', ()=> sendRequest('*collect-cube*', i));
+        /* Hover-Anims ... */
+        scene.appendChild(box);
       });
     }
 
-    // 4) In spawnCubesAt(...) beim Erzeugen der Boxen
-    //    jeweils setupClickHandlers(box, i) aufrufen statt sendRequest direkt
+    // ——————————————————————————————————————————————
+    // 3) WebSocket-Multiplayer (ohne Master-Client-Ansatz)
+    // ——————————————————————————————————————————————
+    const socket=new WebSocket('wss://nosch.uber.space/web-rooms/');
+    let clientId=null, clientCount=0, score=0, cubePositions=[];
+
+    function sendRequest(...msg){ socket.send(JSON.stringify(msg)); }
+
+    socket.addEventListener('open',()=>{
+      sendRequest('*enter-room*','hello-world');
+      sendRequest('*subscribe-client-count*');
+      // STATE ANFORDERN
+      sendRequest('request-initial-cubes');
+      setInterval(()=>socket.send(''),30000);
+    });
+
+    socket.addEventListener('message',evt=>{
+      const [cmd,payload]=JSON.parse(evt.data||'[]');
+      switch(cmd){
+        case '*client-id*':
+          clientId=payload;
+          document.querySelector('#info-display').innerText=`#${clientId}/${clientCount}`;
+          break;
+        case '*client-count*':
+          clientCount=payload;
+          document.querySelector('#info-display').innerText=`#${clientId}/${clientCount}`;
+          break;
+        case 'spawn-cubes':
+          cubePositions=payload;
+          spawnCubesAt(cubePositions);
+          break;
+        case 'collect-cube':
+          // Server führt die Logik aus und broadcastet dann wieder `spawn-cubes`
+          break;
+      }
+    });
   </script>
 </body>
 </html>
