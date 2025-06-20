@@ -10,9 +10,7 @@
   <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
 
   <script>
-    // ———————————————————————————————————————————————
     // teleport-on-hover (ohne Sound)
-    // ———————————————————————————————————————————————
     AFRAME.registerComponent('teleport-on-hover', {
       init: function () {
         const el = this.el;
@@ -20,11 +18,7 @@
         const progressBar = document.querySelector('#progressBar');
 
         function getRandomColorRGB() {
-          return {
-            r: Math.floor(Math.random() * 256),
-            g: Math.floor(Math.random() * 256),
-            b: Math.floor(Math.random() * 256)
-          };
+          return { r:Math.random()*255|0, g:Math.random()*255|0, b:Math.random()*255|0 };
         }
         function rgbToString(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
         function lightenColor(c, amt=10) {
@@ -54,7 +48,6 @@
           }, 300);
 
           teleportTimeout = setTimeout(() => {
-            // Sound entfernt
             el.setAttribute('visible', false);
             progressBar.setAttribute('visible', false);
             clearInterval(progressInterval);
@@ -89,9 +82,7 @@
       }
     });
 
-    // ———————————————————————————————————————————————
     // Hilfsfunktionen fürs Spawnen
-    // ———————————————————————————————————————————————
     const numCubes = 3;
     const minDistOthers = 3, minDistCam = 3;
     const camPos = { x:0, y:1.6, z:0 };
@@ -108,38 +99,34 @@
         if (Math.hypot(newPos.x-pos.x, newPos.y-pos.y, newPos.z-pos.z) < minDistOthers)
           return false;
       }
-      if (Math.hypot(newPos.x-camPos.x, newPos.y-camPos.y, newPos.z-camPos.z) < minDistCam)
-        return false;
-      return true;
+      return Math.hypot(newPos.x-camPos.x, newPos.y-camPos.y, newPos.z-camPos.z) >= minDistCam;
     }
 
     function spawnCubesAt(positions) {
       const scene = document.querySelector('a-scene');
       positions.forEach(pos => {
-        // Erzeuge eine einfache Box statt GLTF-Model
         const box = document.createElement('a-box');
         box.setAttribute('teleport-on-hover','');
         box.setAttribute('scale','0.3 0.3 0.3');
         box.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
-        box.setAttribute('dynamic-body',''); // falls Physik benötigt
-        // Hover-Animation
+        box.setAttribute('dynamic-body','');
         box.setAttribute('animation__mouseenter','property: scale; to: 0.33 0.33 0.33; dur: 300; startEvents: mouseenter');
         box.setAttribute('animation__mouseleave','property: scale; to: 0.3 0.3 0.3; dur: 300; startEvents: mouseleave');
         box.setAttribute('animation__hover',
-          `property: position; dir: alternate; dur:2000; loop:true;
-           to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing: easeInOutSine`
+          `property: position; dir: alternate; dur:2000; loop:true; to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing: easeInOutSine`
         );
         scene.appendChild(box);
       });
     }
 
-    // ———————————————————————————————————————————————
     // Multiplayer via WebSocket
-    // ———————————————————————————————————————————————
     const webRoomsAddr = 'wss://nosch.uber.space/web-rooms/';
     const socket = new WebSocket(webRoomsAddr);
     let clientId = null, clientCount = 0;
     let score = 0;
+
+    // Hier speichern wir die Master-Positionen
+    let cubePositions = [];
 
     function sendRequest(...msg) {
       socket.send(JSON.stringify(msg));
@@ -157,6 +144,7 @@
       document.body.classList.add('disconnected');
     });
 
+    // Ersetzter und erweiterter message-Handler
     socket.addEventListener('message', (evt) => {
       const inc = JSON.parse(evt.data || '[]');
       const cmd = inc[0];
@@ -164,26 +152,40 @@
       switch (cmd) {
         case '*client-id*':
           clientId = inc[1];
-          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
+          document.querySelector('#info-display')
+                  .innerText = `#${clientId}/${clientCount}`;
           if (clientId === 1) {
-            const positions = [];
+            // Master berechnet einmalig die Positionen
+            cubePositions = [];
             for (let i = 0; i < numCubes; i++) {
-              let pos, tries=0;
+              let pos, tries = 0;
               do {
                 pos = getRandomPosition();
                 tries++;
-              } while (!isFarEnough(pos, positions) && tries < 50);
-              positions.push(pos);
+              } while (!isFarEnough(pos, cubePositions) && tries < 50);
+              cubePositions.push(pos);
             }
-            sendRequest('spawn-cubes', positions);
-            spawnCubesAt(positions);
+            sendRequest('spawn-cubes', cubePositions);
+            spawnCubesAt(cubePositions);
           }
           break;
+
         case '*client-count*':
           clientCount = inc[1];
-          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
+          document.querySelector('#info-display')
+                  .innerText = `#${clientId}/${clientCount}`;
           break;
+
+        case '*client-enter*':
+          const newId = inc[1];
+          // Wenn ein neuer Client kommt, Master sendet erneut
+          if (clientId === 1 && newId !== 1) {
+            sendRequest('spawn-cubes', cubePositions);
+          }
+          break;
+
         case 'spawn-cubes':
+          // Jeder Nicht-Master spawnt hier
           if (clientId !== 1) {
             spawnCubesAt(inc[1]);
           }
@@ -195,9 +197,7 @@
 
 <body>
   <a-scene vr-mode-ui="enabled: true" physics="debug: false">
-    <a-assets>
-      <!-- keine externen Assets mehr -->
-    </a-assets>
+    <!-- kein a-assets nötig -->
 
     <!-- Progress-Bar & Score-Text -->
     <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
