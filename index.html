@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VR Cube Game</title>
+
+  <!-- A-Frame + Environment + Physics -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@4.0.1/dist/aframe-physics-system.min.js"></script>
+
+  <script>
+    // ———————————————————————————————————————————————
+    // teleport-on-hover (ohne Sound)
+    // ———————————————————————————————————————————————
+    AFRAME.registerComponent('teleport-on-hover', {
+      init: function () {
+        const el = this.el;
+        let teleportTimeout, fadeInterval, progressInterval;
+        const progressBar = document.querySelector('#progressBar');
+
+        function getRandomColorRGB() {
+          return {
+            r: Math.floor(Math.random() * 256),
+            g: Math.floor(Math.random() * 256),
+            b: Math.floor(Math.random() * 256)
+          };
+        }
+        function rgbToString(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
+        function lightenColor(c, amt=10) {
+          return { r: Math.min(255, c.r+amt), g: Math.min(255, c.g+amt), b: Math.min(255, c.b+amt) };
+        }
+        function updateScore() {
+          document.querySelector('#scoreText')
+            .setAttribute('value', `Punkte: ${score}`);
+        }
+
+        let color = getRandomColorRGB();
+        el.setAttribute('material','color', rgbToString(color));
+
+        el.addEventListener('mouseenter', () => {
+          let prog = 0;
+          progressBar.setAttribute('width', 0.001);
+          progressBar.setAttribute('visible', true);
+
+          progressInterval = setInterval(() => {
+            prog += 0.05;
+            progressBar.setAttribute('width', prog);
+          }, 100);
+
+          fadeInterval = setInterval(() => {
+            color = lightenColor(color);
+            el.setAttribute('material','color', rgbToString(color));
+          }, 300);
+
+          teleportTimeout = setTimeout(() => {
+            // Sound entfernt
+            el.setAttribute('visible', false);
+            progressBar.setAttribute('visible', false);
+            clearInterval(progressInterval);
+
+            setTimeout(() => {
+              let x,y,z,d;
+              const minD=1, maxD=10;
+              do {
+                x = (Math.random()-0.5)*20;
+                y = 1 + Math.random()*3;
+                z = (Math.random()-0.5)*20;
+                d = Math.hypot(x, y-1.6, z);
+              } while (d<minD || d>maxD);
+
+              color = getRandomColorRGB();
+              el.setAttribute('material','color', rgbToString(color));
+              el.setAttribute('position', `${x} ${y} ${z}`);
+              el.setAttribute('visible', true);
+
+              score++;
+              updateScore();
+            }, 1000);
+          }, 2000);
+        });
+
+        el.addEventListener('mouseleave', () => {
+          clearTimeout(teleportTimeout);
+          clearInterval(fadeInterval);
+          clearInterval(progressInterval);
+          progressBar.setAttribute('visible', false);
+        });
+      }
+    });
+
+    // ———————————————————————————————————————————————
+    // Hilfsfunktionen fürs Spawnen
+    // ———————————————————————————————————————————————
+    const numCubes = 3;
+    const minDistOthers = 3, minDistCam = 3;
+    const camPos = { x:0, y:1.6, z:0 };
+
+    function getRandomPosition() {
+      return {
+        x: (Math.random()-0.5)*10,
+        y: 1 + Math.random()*2,
+        z: (Math.random()-0.5)*10
+      };
+    }
+    function isFarEnough(newPos, existing) {
+      for (let pos of existing) {
+        if (Math.hypot(newPos.x-pos.x, newPos.y-pos.y, newPos.z-pos.z) < minDistOthers)
+          return false;
+      }
+      if (Math.hypot(newPos.x-camPos.x, newPos.y-camPos.y, newPos.z-camPos.z) < minDistCam)
+        return false;
+      return true;
+    }
+
+    function spawnCubesAt(positions) {
+      const scene = document.querySelector('a-scene');
+      positions.forEach(pos => {
+        // Erzeuge eine einfache Box statt GLTF-Model
+        const box = document.createElement('a-box');
+        box.setAttribute('teleport-on-hover','');
+        box.setAttribute('scale','0.3 0.3 0.3');
+        box.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+        box.setAttribute('dynamic-body',''); // falls Physik benötigt
+        // Hover-Animation
+        box.setAttribute('animation__mouseenter','property: scale; to: 0.33 0.33 0.33; dur: 300; startEvents: mouseenter');
+        box.setAttribute('animation__mouseleave','property: scale; to: 0.3 0.3 0.3; dur: 300; startEvents: mouseleave');
+        box.setAttribute('animation__hover',
+          `property: position; dir: alternate; dur:2000; loop:true;
+           to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing: easeInOutSine`
+        );
+        scene.appendChild(box);
+      });
+    }
+
+    // ———————————————————————————————————————————————
+    // Multiplayer via WebSocket
+    // ———————————————————————————————————————————————
+    const webRoomsAddr = 'wss://nosch.uber.space/web-rooms/';
+    const socket = new WebSocket(webRoomsAddr);
+    let clientId = null, clientCount = 0;
+    let score = 0;
+
+    function sendRequest(...msg) {
+      socket.send(JSON.stringify(msg));
+    }
+
+    socket.addEventListener('open', () => {
+      sendRequest('*enter-room*', 'hello-world');
+      sendRequest('*subscribe-client-count*');
+      sendRequest('*subscribe-client-enter-exit*');
+      setInterval(() => socket.send(''), 30000);
+    });
+
+    socket.addEventListener('close', () => {
+      clientId = null;
+      document.body.classList.add('disconnected');
+    });
+
+    socket.addEventListener('message', (evt) => {
+      const inc = JSON.parse(evt.data || '[]');
+      const cmd = inc[0];
+
+      switch (cmd) {
+        case '*client-id*':
+          clientId = inc[1];
+          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
+          if (clientId === 1) {
+            const positions = [];
+            for (let i = 0; i < numCubes; i++) {
+              let pos, tries=0;
+              do {
+                pos = getRandomPosition();
+                tries++;
+              } while (!isFarEnough(pos, positions) && tries < 50);
+              positions.push(pos);
+            }
+            sendRequest('*spawn-cubes*', positions);
+            spawnCubesAt(positions);
+          }
+          break;
+        case '*client-count*':
+          clientCount = inc[1];
+          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
+          break;
+        case '*spawn-cubes*':
+          if (clientId !== 1) {
+            spawnCubesAt(inc[1]);
+          }
+          break;
+      }
+    });
+  </script>
+</head>
+
+<body>
+  <a-scene vr-mode-ui="enabled: true" physics="debug: false">
+    <a-assets>
+      <!-- keine externen Assets mehr -->
+    </a-assets>
+
+    <!-- Progress-Bar & Score-Text -->
+    <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
+      <a-entity camera look-controls wasd-controls>
+        <a-cursor fuse="false" material="color: white; shader: flat"></a-cursor>
+        <a-entity position="0 0 -1.5">
+          <a-plane id="progressBar" height="0.05" width="0.001" color="#00FF00"
+                   position="0 -0.1 0" visible="false"></a-plane>
+          <a-text id="scoreText" value="Punkte: 0" color="#000000" align="right"
+                  anchor="right" width="2" position="2.7 -1 0" side="double"></a-text>
+        </a-entity>
+      </a-entity>
+    </a-entity>
+
+    <a-entity environment="preset: forest"></a-entity>
+    <a-light type="ambient" color="#445451"></a-light>
+    <a-light type="point" intensity="2" position="2 4 4"></a-light>
+  </a-scene>
+
+  <div id="title-display">Hello there!</div>
+  <div id="info-display"></div>
+</body>
+</html>
