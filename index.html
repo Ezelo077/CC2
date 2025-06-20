@@ -18,7 +18,7 @@
         const progressBar = document.querySelector('#progressBar');
 
         function getRandomColorRGB() {
-          return { r:Math.random()*255|0, g:Math.random()*255|0, b:Math.random()*255|0 };
+          return { r: Math.random()*255|0, g: Math.random()*255|0, b: Math.random()*255|0 };
         }
         function rgbToString(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
         function lightenColor(c, amt=10) {
@@ -54,13 +54,13 @@
 
             setTimeout(() => {
               let x,y,z,d;
-              const minD=1, maxD=10;
+              const minD = 1, maxD = 10;
               do {
                 x = (Math.random()-0.5)*20;
                 y = 1 + Math.random()*3;
                 z = (Math.random()-0.5)*20;
                 d = Math.hypot(x, y-1.6, z);
-              } while (d<minD || d>maxD);
+              } while (d < minD || d > maxD);
 
               color = getRandomColorRGB();
               el.setAttribute('material','color', rgbToString(color));
@@ -95,38 +95,41 @@
       };
     }
     function isFarEnough(newPos, existing) {
-      for (let pos of existing) {
-        if (Math.hypot(newPos.x-pos.x, newPos.y-pos.y, newPos.z-pos.z) < minDistOthers)
-          return false;
-      }
-      return Math.hypot(newPos.x-camPos.x, newPos.y-camPos.y, newPos.z-camPos.z) >= minDistCam;
+      if (Math.hypot(newPos.x-camPos.x, newPos.y-camPos.y, newPos.z-camPos.z) < minDistCam) return false;
+      return existing.every(pos =>
+        Math.hypot(newPos.x-pos.x, newPos.y-pos.y, newPos.z-pos.z) >= minDistOthers
+      );
     }
 
     function spawnCubesAt(positions) {
       const scene = document.querySelector('a-scene');
+      // Entferne alte Würfel, um Duplikate zu vermeiden
+      document.querySelectorAll('a-box.spawned').forEach(el => el.remove());
       positions.forEach(pos => {
         const box = document.createElement('a-box');
+        box.classList.add('spawned');
         box.setAttribute('teleport-on-hover','');
         box.setAttribute('scale','0.3 0.3 0.3');
         box.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
         box.setAttribute('dynamic-body','');
         box.setAttribute('animation__mouseenter','property: scale; to: 0.33 0.33 0.33; dur: 300; startEvents: mouseenter');
         box.setAttribute('animation__mouseleave','property: scale; to: 0.3 0.3 0.3; dur: 300; startEvents: mouseleave');
-        box.setAttribute('animation__hover',
-          `property: position; dir: alternate; dur:2000; loop:true; to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing: easeInOutSine`
-        );
+        box.setAttribute('animation__hover', `
+          property: position;
+          dir: alternate;
+          dur: 2000;
+          loop: true;
+          to: ${pos.x} ${pos.y+0.3} ${pos.z};
+          easing: easeInOutSine
+        `);
         scene.appendChild(box);
       });
     }
 
     // Multiplayer via WebSocket
-    const webRoomsAddr = 'wss://nosch.uber.space/web-rooms/';
-    const socket = new WebSocket(webRoomsAddr);
-    let clientId = null, clientCount = 0;
-    let score = 0;
-
-    // Hier speichern wir die Master-Positionen
-    let cubePositions = [];
+    const socket = new WebSocket('wss://nosch.uber.space/web-rooms/');
+    let clientId = null, clientCount = 0, score = 0;
+    let cubePositions = [];  // Master-Positionen
 
     function sendRequest(...msg) {
       socket.send(JSON.stringify(msg));
@@ -144,7 +147,6 @@
       document.body.classList.add('disconnected');
     });
 
-    // Ersetzter und erweiterter message-Handler
     socket.addEventListener('message', (evt) => {
       const inc = JSON.parse(evt.data || '[]');
       const cmd = inc[0];
@@ -155,7 +157,7 @@
           document.querySelector('#info-display')
                   .innerText = `#${clientId}/${clientCount}`;
           if (clientId === 1) {
-            // Master berechnet einmalig die Positionen
+            // Master berechnet Positionen und sendet
             cubePositions = [];
             for (let i = 0; i < numCubes; i++) {
               let pos, tries = 0;
@@ -166,7 +168,6 @@
               cubePositions.push(pos);
             }
             sendRequest('spawn-cubes', cubePositions);
-            spawnCubesAt(cubePositions);
           }
           break;
 
@@ -178,17 +179,15 @@
 
         case '*client-enter*':
           const newId = inc[1];
-          // Wenn ein neuer Client kommt, Master sendet erneut
           if (clientId === 1 && newId !== 1) {
+            // Master sendet bei jedem neuen Join erneut
             sendRequest('spawn-cubes', cubePositions);
           }
           break;
 
         case 'spawn-cubes':
-          // Jeder Nicht-Master spawnt hier
-          if (clientId !== 1) {
-            spawnCubesAt(inc[1]);
-          }
+          // Alle Clients (inkl. Master) spawnen hier
+          spawnCubesAt(inc[1]);
           break;
       }
     });
@@ -197,17 +196,27 @@
 
 <body>
   <a-scene vr-mode-ui="enabled: true" physics="debug: false">
-    <!-- kein a-assets nötig -->
+    <!-- keine externen Assets nötig -->
 
     <!-- Progress-Bar & Score-Text -->
     <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
       <a-entity camera look-controls wasd-controls>
         <a-cursor fuse="false" material="color: white; shader: flat"></a-cursor>
         <a-entity position="0 0 -1.5">
-          <a-plane id="progressBar" height="0.05" width="0.001" color="#00FF00"
-                   position="0 -0.1 0" visible="false"></a-plane>
-          <a-text id="scoreText" value="Punkte: 0" color="#000000" align="right"
-                  anchor="right" width="2" position="2.7 -1 0" side="double"></a-text>
+          <a-plane id="progressBar"
+                   height="0.05" width="0.001"
+                   color="#00FF00"
+                   position="0 -0.1 0"
+                   visible="false">
+          </a-plane>
+          <a-text id="scoreText"
+                  value="Punkte: 0"
+                  color="#000000"
+                  align="right"
+                  anchor="right"
+                  width="2"
+                  position="2.7 -1 0">
+          </a-text>
         </a-entity>
       </a-entity>
     </a-entity>
