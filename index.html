@@ -4,10 +4,8 @@
   <meta charset="utf-8" />
   <title>VR Cube Game</title>
 
-  <!-- Favicon, um 404 zu verhindern -->
   <link rel="icon" href="data:;base64,=">
 
-  <!-- A-Frame + Environment + Physics (Physics-System auf v3.3.0) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@3.3.0/dist/aframe-physics-system.min.js"></script>
@@ -15,7 +13,6 @@
 
 <body>
   <a-scene vr-mode-ui="enabled: true" physics="debug: false">
-    <!-- Rig, Cursor mit Raycaster auf .spawned, Progress Bar & Score -->
     <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
       <a-entity camera look-controls wasd-controls>
         <a-cursor fuse="false" material="color:white;shader:flat" raycaster="objects: .spawned"></a-cursor>
@@ -23,8 +20,8 @@
           <a-plane id="progressBar" height="0.05" width="0.001"
                    color="#00FF00" position="0 -0.1 0" visible="false"></a-plane>
           <a-text id="scoreText" value="Punkte: 0"
-                  color="#000" align="right" anchor="right" width="2"
-                  position="2.7 -1 0"></a-text>
+                   color="#000" align="right" anchor="right" width="2"
+                   position="2.7 -1 0"></a-text>
         </a-entity>
       </a-entity>
     </a-entity>
@@ -55,7 +52,7 @@
         }
         function updateScore() {
           document.querySelector('#scoreText')
-                  .setAttribute('value', `Punkte: ${score}`);
+                    .setAttribute('value', `Punkte: ${score}`);
         }
         let color = getRandomColorRGB();
         el.setAttribute('material','color',rgbToString(color));
@@ -107,7 +104,7 @@
     // —————————————————————————————————————————————
     const numCubes = 3;
     const minDistOthers = 3, minDistCam = 3;
-    const camPos = { x:0, y:1.6, z:0 };
+    const camPos = { x:0, y:1.6, z:0 }; // This should ideally be the rig's initial position
     function getRandomPosition() {
       return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 };
     }
@@ -116,17 +113,25 @@
       return arr.every(o=>Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z) >= minDistOthers);
     }
     function spawnCubesAt(positions) {
+      console.log(`[Client ${clientId}] Spawning cubes at positions:`, positions); // DEBUG LOG
       const scene = document.querySelector('a-scene');
       // Alte Boxen entfernen
-      document.querySelectorAll('a-box.spawned').forEach(el=>el.remove());
+      document.querySelectorAll('a-box.spawned').forEach(el=>{
+        console.log(`[Client ${clientId}] Removing old cube:`, el.id || el.outerHTML); // DEBUG LOG
+        el.remove();
+      });
       positions.forEach((pos,i) => {
         const box = document.createElement('a-box');
         box.classList.add('spawned');
+        box.setAttribute('id', `cube-${i}`); // Add unique ID for easier debugging
         box.setAttribute('teleport-on-hover','');
         box.setAttribute('scale','0.3 0.3 0.3');
         box.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
         // Einsammeln per Click (oder Gaze)
-        box.addEventListener('click', ()=> sendRequest('collect-cube', i));
+        box.addEventListener('click', ()=> {
+          console.log(`[Client ${clientId}] Cube ${i} clicked. Sending 'collect-cube'.`); // DEBUG LOG
+          sendRequest('collect-cube', i);
+        });
         // Hover-Animation
         box.setAttribute('animation__mouseenter',
           'property: scale; to: 0.33 0.33 0.33; dur:300; startEvents:mouseenter');
@@ -136,6 +141,7 @@
           `property: position; dir: alternate; dur:2000; loop:true;
            to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
         scene.appendChild(box);
+        console.log(`[Client ${clientId}] Added new cube: cube-${i} at ${pos.x} ${pos.y} ${pos.z}`); // DEBUG LOG
       });
     }
 
@@ -146,27 +152,40 @@
     let clientId = null, clientCount = 0, score = 0;
     let cubePositions = [], lastClientCount = 0;
 
-    function sendRequest(...msg) { socket.send(JSON.stringify(msg)); }
+    function sendRequest(...msg) {
+      console.log(`[Client ${clientId}] Sending:`, msg); // DEBUG LOG
+      socket.send(JSON.stringify(msg));
+    }
 
     socket.addEventListener('open', () => {
+      console.log(`[Client ${clientId}] WebSocket connected.`); // DEBUG LOG
       sendRequest('*enter-room*','hello-world');
       sendRequest('*subscribe-client-count*');
       sendRequest('*subscribe-client-enter-exit*');
-      setInterval(()=>socket.send(''),30000);
+      setInterval(()=>socket.send(''),30000); // Keep-alive
     });
     socket.addEventListener('close', () => {
+      console.log(`[Client ${clientId}] WebSocket disconnected.`); // DEBUG LOG
       clientId = null;
       document.body.classList.add('disconnected');
     });
+    socket.addEventListener('error', (err) => {
+      console.error(`[Client ${clientId}] WebSocket error:`, err); // DEBUG LOG
+    });
 
     socket.addEventListener('message', evt => {
-      const inc = JSON.parse(evt.data||'[]'), cmd = inc[0];
+      const inc = JSON.parse(evt.data||'[]');
+      const cmd = inc[0];
+      console.log(`[Client ${clientId}] Received:`, cmd, inc[1]); // DEBUG LOG for all received messages
+
       switch (cmd) {
         case '*client-id*':
           clientId = inc[1];
           document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
+          console.log(`[Client ${clientId}] My client ID is: ${clientId}. Current client count: ${clientCount}`); // DEBUG LOG
           if (clientId === 1) {
             // Master initialisiert
+            console.log(`[Client ${clientId}] I am the master client. Initializing cubes.`); // DEBUG LOG
             cubePositions = [];
             for (let i = 0; i < numCubes; i++) {
               let p, tries = 0;
@@ -182,8 +201,10 @@
         case '*client-count*':
           clientCount = inc[1];
           document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
+          console.log(`[Client ${clientId}] Client count updated: ${clientCount}. Last count: ${lastClientCount}`); // DEBUG LOG
           // Wenn Master und ein neuer Client dazukommt, erneut senden
           if (clientId === 1 && clientCount > lastClientCount) {
+            console.log(`[Client ${clientId}] New client detected. Resending cube positions.`); // DEBUG LOG
             sendRequest('spawn-cubes', cubePositions);
           }
           lastClientCount = clientCount;
@@ -191,21 +212,30 @@
 
         case 'spawn-cubes':
           // Alle Clients (inkl. Master) spawnen
+          console.log(`[Client ${clientId}] Received 'spawn-cubes' command. Spawning cubes...`, inc[1]); // DEBUG LOG
           spawnCubesAt(inc[1]);
           break;
 
         case 'collect-cube':
           const idx = inc[1];
+          console.log(`[Client ${clientId}] Received 'collect-cube' command for cube index: ${idx}`); // DEBUG LOG
           if (clientId === 1) {
             // Master berechnet neue Position für eingesammelten Würfel
+            console.log(`[Client ${clientId}] I am the master. Calculating new position for cube ${idx}.`); // DEBUG LOG
             let newPos, tries = 0;
             do { newPos = getRandomPosition(); tries++; }
             while (!isFarEnough(newPos, cubePositions) && tries<50);
             cubePositions[idx] = newPos;
             // allen Clients aktualisieren
             sendRequest('spawn-cubes', cubePositions);
+          } else {
+            // Non-master clients implicitly update when 'spawn-cubes' is received from master
+            console.log(`[Client ${clientId}] Not master, waiting for 'spawn-cubes' from master for update.`); // DEBUG LOG
           }
           break;
+        default:
+            console.log(`[Client ${clientId}] Unknown command received:`, cmd, inc);
+            break;
       }
     });
   </script>
