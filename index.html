@@ -104,7 +104,7 @@
     // —————————————————————————————————————————————
     const numCubes = 3;
     const minDistOthers = 3, minDistCam = 3;
-    const camPos = { x:0, y:1.6, z:0 }; // This should ideally be the rig's initial position
+    const camPos = { x:0, y:1.6, z:0 };
     function getRandomPosition() {
       return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 };
     }
@@ -113,11 +113,13 @@
       return arr.every(o=>Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z) >= minDistOthers);
     }
     function spawnCubesAt(positions) {
-      console.log(`[Client ${clientId}] Spawning cubes at positions:`, positions); // DEBUG LOG
+      // DEBUG LOG
+      console.log(`[Client ${clientId}] Spawning cubes at positions:`, positions);
       const scene = document.querySelector('a-scene');
       // Alte Boxen entfernen
       document.querySelectorAll('a-box.spawned').forEach(el=>{
-        console.log(`[Client ${clientId}] Removing old cube:`, el.id || el.outerHTML); // DEBUG LOG
+        // DEBUG LOG
+        console.log(`[Client ${clientId}] Removing old cube:`, el.id || el.outerHTML);
         el.remove();
       });
       positions.forEach((pos,i) => {
@@ -129,7 +131,10 @@
         box.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
         // Einsammeln per Click (oder Gaze)
         box.addEventListener('click', ()=> {
-          console.log(`[Client ${clientId}] Cube ${i} clicked. Sending 'collect-cube'.`); // DEBUG LOG
+          // DEBUG LOG
+          console.log(`[Client ${clientId}] Cube ${i} clicked. Sending 'collect-cube'.`);
+          // Der Click sendet immer noch 'collect-cube' an den Master.
+          // Der Master wird dann *broadcasten*.
           sendRequest('collect-cube', i);
         });
         // Hover-Animation
@@ -141,7 +146,8 @@
           `property: position; dir: alternate; dur:2000; loop:true;
            to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
         scene.appendChild(box);
-        console.log(`[Client ${clientId}] Added new cube: cube-${i} at ${pos.x} ${pos.y} ${pos.z}`); // DEBUG LOG
+        // DEBUG LOG
+        console.log(`[Client ${clientId}] Added new cube: cube-${i} at ${pos.x} ${pos.y} ${pos.z}`);
       });
     }
 
@@ -153,39 +159,49 @@
     let cubePositions = [], lastClientCount = 0;
 
     function sendRequest(...msg) {
-      console.log(`[Client ${clientId}] Sending:`, msg); // DEBUG LOG
+      // DEBUG LOG
+      console.log(`[Client ${clientId}] Sending:`, msg);
       socket.send(JSON.stringify(msg));
     }
 
     socket.addEventListener('open', () => {
-      console.log(`[Client ${clientId}] WebSocket connected.`); // DEBUG LOG
-      sendRequest('*enter-room*','hello-world');
+      // DEBUG LOG
+      console.log(`[Client ${clientId}] WebSocket connected.`);
+      // Stelle sicher, dass der Raumnamen immer gleich ist für alle Clients
+      const roomName = 'hello-world'; // Dies sollte der feste, gemeinsame Raumname sein
+      console.log(`[Client ${clientId}] Entering room: '${roomName}'`); // DEBUG LOG
+      sendRequest('*enter-room*', roomName);
       sendRequest('*subscribe-client-count*');
       sendRequest('*subscribe-client-enter-exit*');
       setInterval(()=>socket.send(''),30000); // Keep-alive
     });
     socket.addEventListener('close', () => {
-      console.log(`[Client ${clientId}] WebSocket disconnected.`); // DEBUG LOG
+      // DEBUG LOG
+      console.log(`[Client ${clientId}] WebSocket disconnected.`);
       clientId = null;
       document.body.classList.add('disconnected');
     });
     socket.addEventListener('error', (err) => {
-      console.error(`[Client ${clientId}] WebSocket error:`, err); // DEBUG LOG
+      // DEBUG LOG
+      console.error(`[Client ${clientId}] WebSocket error:`, err);
     });
 
     socket.addEventListener('message', evt => {
       const inc = JSON.parse(evt.data||'[]');
       const cmd = inc[0];
-      console.log(`[Client ${clientId}] Received:`, cmd, inc[1]); // DEBUG LOG for all received messages
+      // DEBUG LOG for all received messages
+      console.log(`[Client ${clientId}] Received:`, cmd, inc[1]);
 
       switch (cmd) {
         case '*client-id*':
           clientId = inc[1];
           document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
-          console.log(`[Client ${clientId}] My client ID is: ${clientId}. Current client count: ${clientCount}`); // DEBUG LOG
+          // DEBUG LOG
+          console.log(`[Client ${clientId}] My client ID is: ${clientId}. Current client count: ${clientCount}`);
           if (clientId === 1) {
             // Master initialisiert
-            console.log(`[Client ${clientId}] I am the master client. Initializing cubes.`); // DEBUG LOG
+            // DEBUG LOG
+            console.log(`[Client ${clientId}] I am the master client. Initializing cubes.`);
             cubePositions = [];
             for (let i = 0; i < numCubes; i++) {
               let p, tries = 0;
@@ -194,46 +210,54 @@
               cubePositions.push(p);
             }
             spawnCubesAt(cubePositions);
-            sendRequest('spawn-cubes', cubePositions);
+            // Sende die Würfelpositionen an ALLE Clients im Raum
+            sendRequest('*broadcast*', 'spawn-cubes', cubePositions); // <--- HIER ANGEPASST
           }
           break;
 
         case '*client-count*':
           clientCount = inc[1];
           document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
-          console.log(`[Client ${clientId}] Client count updated: ${clientCount}. Last count: ${lastClientCount}`); // DEBUG LOG
+          // DEBUG LOG
+          console.log(`[Client ${clientId}] Client count updated: ${clientCount}. Last count: ${lastClientCount}`);
           // Wenn Master und ein neuer Client dazukommt, erneut senden
           if (clientId === 1 && clientCount > lastClientCount) {
-            console.log(`[Client ${clientId}] New client detected. Resending cube positions.`); // DEBUG LOG
-            sendRequest('spawn-cubes', cubePositions);
+            // DEBUG LOG
+            console.log(`[Client ${clientId}] New client detected. Resending cube positions.`);
+            // Sende die Würfelpositionen an ALLE Clients im Raum
+            sendRequest('*broadcast*', 'spawn-cubes', cubePositions); // <--- HIER ANGEPASST
           }
           lastClientCount = clientCount;
           break;
 
         case 'spawn-cubes':
           // Alle Clients (inkl. Master) spawnen
-          console.log(`[Client ${clientId}] Received 'spawn-cubes' command. Spawning cubes...`, inc[1]); // DEBUG LOG
+          // DEBUG LOG
+          console.log(`[Client ${clientId}] Received 'spawn-cubes' command. Spawning cubes...`, inc[1]);
           spawnCubesAt(inc[1]);
           break;
 
         case 'collect-cube':
           const idx = inc[1];
-          console.log(`[Client ${clientId}] Received 'collect-cube' command for cube index: ${idx}`); // DEBUG LOG
+          // DEBUG LOG
+          console.log(`[Client ${clientId}] Received 'collect-cube' command for cube index: ${idx}`);
           if (clientId === 1) {
             // Master berechnet neue Position für eingesammelten Würfel
-            console.log(`[Client ${clientId}] I am the master. Calculating new position for cube ${idx}.`); // DEBUG LOG
+            // DEBUG LOG
+            console.log(`[Client ${clientId}] I am the master. Calculating new position for cube ${idx}.`);
             let newPos, tries = 0;
             do { newPos = getRandomPosition(); tries++; }
             while (!isFarEnough(newPos, cubePositions) && tries<50);
             cubePositions[idx] = newPos;
-            // allen Clients aktualisieren
-            sendRequest('spawn-cubes', cubePositions);
+            // allen Clients aktualisieren, indem die neuen Positionen an ALLE im Raum gesendet werden
+            sendRequest('*broadcast*', 'spawn-cubes', cubePositions); // <--- HIER ANGEPASST
           } else {
-            // Non-master clients implicitly update when 'spawn-cubes' is received from master
-            console.log(`[Client ${clientId}] Not master, waiting for 'spawn-cubes' from master for update.`); // DEBUG LOG
+            // DEBUG LOG
+            console.log(`[Client ${clientId}] Not master, waiting for 'spawn-cubes' from master for update.`);
           }
           break;
         default:
+            // DEBUG LOG
             console.log(`[Client ${clientId}] Unknown command received:`, cmd, inc);
             break;
       }
