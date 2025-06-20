@@ -3,25 +3,21 @@
 <head>
   <meta charset="utf-8" />
   <title>VR Cube Game</title>
+  <link rel="icon" href="data:;base64,=">  
 
-  <link rel="icon" href="data:;base64,=">
-
+  <!-- A-Frame + Environment + Physics (Physics-System v3.3.0) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@3.3.0/dist/aframe-physics-system.min.js"></script>
 </head>
-
 <body>
-  <a-scene vr-mode-ui="enabled: true" physics="debug: false">
+  <a-scene vr-mode-ui="enabled: true" physics="debug: false" renderer="physicallyCorrectLights: true">
     <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
       <a-entity camera look-controls wasd-controls>
         <a-cursor fuse="false" material="color:white;shader:flat" raycaster="objects: .spawned"></a-cursor>
         <a-entity position="0 0 -1.5">
-          <a-plane id="progressBar" height="0.05" width="0.001"
-                   color="#00FF00" position="0 -0.1 0" visible="false"></a-plane>
-          <a-text id="scoreText" value="Punkte: 0"
-                   color="#000" align="right" anchor="right" width="2"
-                   position="2.7 -1 0"></a-text>
+          <a-plane id="progressBar" height="0.05" width="0.001" color="#00FF00" visible="false"></a-plane>
+          <a-text id="scoreText" value="Punkte: 0" color="#000" align="right" anchor="right" width="2"></a-text>
         </a-entity>
       </a-entity>
     </a-entity>
@@ -31,284 +27,142 @@
     <a-light type="point" intensity="2" position="2 4 4"></a-light>
   </a-scene>
 
-  <div id="title-display">Hello there!</div>
   <div id="info-display"></div>
 
   <script>
-    // —————————————————————————————————————————————
-    // 1) teleport-on-hover-Component
-    // —————————————————————————————————————————————
+    // 1) teleport-on-hover component mit Index-Schema
     AFRAME.registerComponent('teleport-on-hover', {
+      schema: { index: { type: 'int' } },
       init: function () {
         const el = this.el;
+        const idx = this.data.index;
         let teleportTimeout, fadeInterval, progressInterval;
         const progressBar = document.querySelector('#progressBar');
-        function getRandomColorRGB() {
-          return { r:Math.random()*255|0, g:Math.random()*255|0, b:Math.random()*255|0 };
-        }
-        function rgbToString(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
-        function lightenColor(c, amt=10) {
-          return { r: Math.min(255, c.r+amt), g: Math.min(255, c.g+amt), b: Math.min(255, c.b+amt) };
-        }
-        // updateScore ist jetzt global, da score auch global ist
-        // function updateScore() { /* ... */ }
 
-        // Initialfarbe setzen
+        function getRandomColorRGB() { return { r: Math.random()*255|0, g: Math.random()*255|0, b: Math.random()*255|0 }; }
+        function rgbToString(c)     { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
+        function lighten(c, amt=10) { return { r: Math.min(255,c.r+amt), g: Math.min(255,c.g+amt), b: Math.min(255,c.b+amt) }; }
+        function updateScore() {
+          document.querySelector('#scoreText').setAttribute('value', `Punkte: ${score}`);
+        }
+
         let color = getRandomColorRGB();
-        el.setAttribute('material','color',rgbToString(color));
+        el.setAttribute('material','color', rgbToString(color));
 
         el.addEventListener('mouseenter', () => {
-          let prog=0;
-          progressBar.setAttribute('width',0.001);
-          progressBar.setAttribute('visible',true);
-          progressInterval = setInterval(()=>{
-            prog+=0.05;
-            progressBar.setAttribute('width',prog);
-          },100);
-          fadeInterval = setInterval(()=>{
-            color = lightenColor(color);
-            el.setAttribute('material','color',rgbToString(color));
-          },300);
-          teleportTimeout = setTimeout(()=>{
-            // Der Würfel wird nicht hier "teleportiert", sondern nur unsichtbar gemacht.
-            // Die eigentliche "Teleportation" (Neupositionierung) kommt vom Server-Update.
-            el.setAttribute('visible',false);
-            progressBar.setAttribute('visible',false);
+          let prog = 0;
+          progressBar.setAttribute('width', 0.001);
+          progressBar.setAttribute('visible', true);
+          progressInterval = setInterval(() => {
+            prog += 0.05;
+            progressBar.setAttribute('width', prog);
+          }, 100);
+          fadeInterval = setInterval(() => {
+            color = lighten(color);
+            el.setAttribute('material','color', rgbToString(color));
+          }, 300);
+
+          teleportTimeout = setTimeout(() => {
             clearInterval(progressInterval);
-            // score++; // Score-Update erfolgt jetzt nur, wenn der Server die Änderung bestätigt
-            // updateScore();
-          },2000);
+            clearInterval(fadeInterval);
+            progressBar.setAttribute('visible', false);
+            // Score erhöhen und Server benachrichtigen
+            score++;
+            updateScore();
+            sendRequest('*collect-cube*', idx);
+          }, 2000);
         });
+
         el.addEventListener('mouseleave', () => {
           clearTimeout(teleportTimeout);
           clearInterval(fadeInterval);
           clearInterval(progressInterval);
-          progressBar.setAttribute('visible',false);
-          // Farbe auf ursprüngliche (zufällige) Farbe zurücksetzen, falls gewünscht
-          // el.setAttribute('material','color',rgbToString(color));
+          progressBar.setAttribute('visible', false);
         });
       }
     });
 
-    // —————————————————————————————————————————————
-    // 2) Spawn-Hilfsfunktionen
-    // —————————————————————————————————————————————
-    const numCubes = 3; // Anzahl der Würfel
-    const minDistOthers = 3, minDistCam = 3; // Mindestabstände für Positionierung
-    const camPos = { x:0, y:1.6, z:0 }; // Startposition der Kamera (Rig)
-
-    // Globale Hilfsfunktion für die Punkteanzeige
-    let score = 0; // Globaler Score
-    function updateScore() {
-      document.querySelector('#scoreText').setAttribute('value', `Punkte: ${score}`);
+    // 2) Spawn-Helpers mit Index für jeden Würfel
+    const numCubes = 3;
+    const minDistOthers = 3, minDistCam = 3;
+    const camPos = { x:0, y:1.6, z:0 };
+    function getRandomPosition(){ return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 }; }
+    function isFarEnough(p, arr){
+      if (Math.hypot(p.x-camPos.x, p.y-camPos.y, p.z-camPos.z) < minDistCam) return false;
+      return arr.every(o => Math.hypot(p.x-o.x, p.y-o.y, p.z-o.z) >= minDistOthers);
     }
-
-    function getRandomPosition() {
-      return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 };
-    }
-    function isFarEnough(p, arr) {
-      if (Math.hypot(p.x-camPos.x,p.y-camPos.y,p.z-camPos.z) < minDistCam) return false;
-      return arr.every(o=>Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z) >= minDistOthers);
-    }
-
-    // `spawnCubesAt` empfängt jetzt ein Objekt von Würfeln mit ihren IDs
-    let activeCubes = {}; // Globales Objekt zum Speichern der aktiven Würfel (ID -> Position/Daten)
-
-    function spawnCubesAt(cubesData) {
-      console.log(`[Client ${clientId}] Spawning/Updating cubes:`, cubesData);
+    function spawnCubesAt(positions){
       const scene = document.querySelector('a-scene');
-
-      // Entferne Würfel, die nicht mehr in cubesData sind (d.h. eingesammelt wurden)
-      document.querySelectorAll('a-box.spawned').forEach(el => {
-        const cubeId = el.getAttribute('data-cube-id');
-        if (!cubesData[cubeId]) {
-          console.log(`[Client ${clientId}] Removing cube with ID: ${cubeId}`);
-          el.remove();
-        }
-      });
-
-      // Füge neue Würfel hinzu oder aktualisiere bestehende
-      for (const cubeId in cubesData) {
-        const pos = cubesData[cubeId];
-        let box = document.querySelector(`a-box[data-cube-id="${cubeId}"]`);
-
-        if (!box) {
-          // Würfel existiert noch nicht, erstelle ihn neu
-          box = document.createElement('a-box');
-          box.classList.add('spawned');
-          box.setAttribute('data-cube-id', cubeId); // Eindeutige ID für den Würfel
-          box.setAttribute('teleport-on-hover','');
-          box.setAttribute('scale','0.3 0.3 0.3');
-          
-          // Initialfarbe setzen (wird sonst vom Komponent überschrieben)
-          // Kann auch zufällig sein, da teleport-on-hover es dann aufhellt
-          box.setAttribute('material','color',rgbToString(getRandomColorRGB()));
-
-          // Einsammeln per Click
-          box.addEventListener('click', ()=> {
-            console.log(`[Client ${clientId}] Cube ${cubeId} clicked. Requesting collection.`);
-            // Sende die Anfrage, DIESEN Würfel einzusammeln, an den Server.
-            // Der Server wird entscheiden und das Ergebnis an alle Clients broadcasten.
-            sendRequest('*broadcast*', 'collect-cube-request', { cubeId: cubeId, clientCollecting: clientId });
-          });
-
-          // Hover-Animationen
-          box.setAttribute('animation__mouseenter',
-            'property: scale; to: 0.33 0.33 0.33; dur:300; startEvents:mouseenter');
-          box.setAttribute('animation__mouseleave',
-            'property: scale; to: 0.3 0.3 0.3; dur:300; startEvents:mouseleave');
-          box.setAttribute('animation__hover',
-            `property: position; dir: alternate; dur:2000; loop:true;
-             to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
-          
-          scene.appendChild(box);
-          console.log(`[Client ${clientId}] Added new cube: ${cubeId} at ${pos.x} ${pos.y} ${pos.z}`);
-        }
-        // Position des Würfels aktualisieren (für neue oder bestehende)
+      document.querySelectorAll('a-box.spawned').forEach(el => el.remove());
+      positions.forEach((pos, i) => {
+        const box = document.createElement('a-box');
+        box.classList.add('spawned');
+        box.setAttribute('teleport-on-hover', `index: ${i}`);  // Index übergeben
+        box.setAttribute('scale','0.3 0.3 0.3');
         box.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
-      }
-      activeCubes = cubesData; // Aktuellen Zustand der Würfel speichern
+        box.addEventListener('click', () => sendRequest('*collect-cube*', i)); // Fallback für Klick
+        box.setAttribute('animation__mouseenter','property: scale; to: 0.33 0.33 0.33; dur:300; startEvents:mouseenter');
+        box.setAttribute('animation__mouseleave','property: scale; to: 0.3 0.3 0.3; dur:300; startEvents:mouseleave');
+        box.setAttribute('animation__hover',`property: position; dir:alternate; dur:2000; loop:true; to:${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
+        scene.appendChild(box);
+      });
     }
 
-    // —————————————————————————————————————————————
-    // 3) WebSocket-Multiplayer + Collection
-    // —————————————————————————————————————————————
+    // 3) Master-Client WebSocket Logic bleibt unverändert
     const socket = new WebSocket('wss://nosch.uber.space/web-rooms/');
-    let clientId = null, clientCount = 0;
-    const gameRoomName = 'my-super-awesome-vr-game-room-2025'; // WICHTIG: Ein einzigartiger und fester Raumname
+    let clientId = null, clientCount = 0, score = 0;
+    let cubePositions = [], lastClientCount = 0;
 
-    function sendRequest(...msg) {
-      console.log(`[Client ${clientId}] Sending:`, msg);
-      socket.send(JSON.stringify(msg));
-    }
+    function sendRequest(...msg){ socket.send(JSON.stringify(msg)); }
 
     socket.addEventListener('open', () => {
-      console.log(`[Client ${clientId}] WebSocket connected.`);
-      console.log(`[Client ${clientId}] Entering room: '${gameRoomName}'`);
-      sendRequest('*enter-room*', gameRoomName);
+      sendRequest('*enter-room*','hello-world');
       sendRequest('*subscribe-client-count*');
       sendRequest('*subscribe-client-enter-exit*');
-      
-      // Request initial cube state from the server (or suggest it if this is the first client)
-      // Since there's no master, any client could potentially propose the initial state.
-      // We'll let the first client that joins request the initial state.
-      // If the server stores the state, it will send it. If not, the first client will generate.
-      sendRequest('*broadcast*', 'request-initial-cubes'); // Broadcast, um alle Clients zu informieren
-
-      setInterval(()=>socket.send(''),30000); // Keep-alive
-    });
-
-    socket.addEventListener('close', () => {
-      console.log(`[Client ${clientId}] WebSocket disconnected.`);
-      clientId = null;
-      document.body.classList.add('disconnected');
-    });
-    socket.addEventListener('error', (err) => {
-      console.error(`[Client ${clientId}] WebSocket error:`, err);
+      setInterval(() => socket.send(''),30000);
     });
 
     socket.addEventListener('message', evt => {
-      const inc = JSON.parse(evt.data||'[]');
-      const cmd = inc[0];
-      console.log(`[Client ${clientId}] Received:`, cmd, inc[1]);
-
-      switch (cmd) {
+      const inc = JSON.parse(evt.data||'[]'), cmd = inc[0], data = inc[1];
+      switch(cmd){
         case '*client-id*':
-          clientId = inc[1];
+          clientId = data;
           document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
-          console.log(`[Client ${clientId}] My client ID is: ${clientId}. Current client count: ${clientCount}`);
-          break;
-
-        case '*client-count*':
-          clientCount = inc[1];
-          document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
-          console.log(`[Client ${clientId}] Client count updated: ${clientCount}. Last count: ${lastClientCount}`);
-          // Wenn ein neuer Client dazukommt, soll *jeder* Client, der den aktuellen Zustand kennt, ihn erneut anfordern oder senden.
-          // Hier senden wir erneut einen Request, damit der Client mit dem "aktuellsten" Zustand ihn broadcastet.
-          if (clientCount > lastClientCount) {
-             console.log(`[Client ${clientId}] New client detected. Requesting current cube state.`);
-             sendRequest('*broadcast*', 'request-current-cubes');
+          if (clientId === 1){
+            cubePositions = [];
+            for(let i=0;i<numCubes;i++){
+              let p,tries=0;
+              do{ p=getRandomPosition(); tries++; }
+              while(!isFarEnough(p,cubePositions)&&tries<50);
+              cubePositions.push(p);
+            }
+            spawnCubesAt(cubePositions);
+            sendRequest('*spawn-cubes*', cubePositions);
           }
+          break;
+        case '*client-count*':
+          clientCount = data;
+          document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
+          if(clientId===1 && clientCount>lastClientCount){ sendRequest('*spawn-cubes*', cubePositions); }
           lastClientCount = clientCount;
           break;
-
-        case '*broadcast*':
-          const broadcastCmd = inc[1];
-          const broadcastData = inc[2];
-          console.log(`[Client ${clientId}] Received broadcast: Command='${broadcastCmd}', Data=`, broadcastData);
-
-          switch (broadcastCmd) {
-            case 'request-initial-cubes':
-                // Wenn noch keine Würfel aktiv sind und dieser Client existiert, kann er die Initialpositionen vorschlagen
-                if (Object.keys(activeCubes).length === 0) {
-                    console.log(`[Client ${clientId}] No active cubes. Generating initial cubes.`);
-                    const initialCubes = {};
-                    for (let i = 0; i < numCubes; i++) {
-                        let p, tries = 0;
-                        let existingPositions = Object.values(initialCubes);
-                        do { p = getRandomPosition(); tries++; }
-                        while (!isFarEnough(p, existingPositions) && tries < 50);
-                        initialCubes[`cube_${Date.now()}_${i}`] = p; // Eindeutige ID generieren
-                    }
-                    sendRequest('*broadcast*', 'update-cubes', initialCubes);
-                }
-                break;
-
-            case 'request-current-cubes':
-                // Wenn ein Client den aktuellen Zustand der Würfel kennt (activeCubes ist nicht leer),
-                // sendet er ihn an alle, damit neue Clients ihn erhalten.
-                if (Object.keys(activeCubes).length > 0) {
-                    console.log(`[Client ${clientId}] Sending current cube state to new clients.`);
-                    sendRequest('*broadcast*', 'update-cubes', activeCubes);
-                }
-                break;
-
-            case 'update-cubes': // Server sendet aktualisierten Würfelzustand
-                // Dies ist die primäre Nachricht, um den Würfelzustand zu synchronisieren
-                console.log(`[Client ${clientId}] Processing 'update-cubes'.`);
-                spawnCubesAt(broadcastData); // Aktualisiere die Szene basierend auf den neuen Daten
-                break;
-
-            case 'collect-cube-request': // Ein Client hat das Einsammeln eines Würfels angefragt
-                const requestedCubeId = broadcastData.cubeId;
-                const clientCollectingId = broadcastData.clientCollecting;
-                
-                // Stelle sicher, dass der angefragte Würfel noch existiert
-                if (activeCubes[requestedCubeId]) {
-                    console.log(`[Client ${clientId}] Cube ${requestedCubeId} collected by client ${clientCollectingId}.`);
-                    
-                    // Lokalen Score des einsammelnden Clients erhöhen
-                    if (clientId === clientCollectingId) {
-                        score++;
-                        updateScore();
-                    }
-
-                    // Neuen Zustand vorbereiten (Würfel entfernen und einen neuen generieren)
-                    const newCubesState = { ...activeCubes };
-                    delete newCubesState[requestedCubeId]; // Entferne den eingesammelten Würfel
-
-                    let newPos, tries = 0;
-                    let existingPositions = Object.values(newCubesState); // Positionen der verbleibenden Würfel
-                    do { newPos = getRandomPosition(); tries++; }
-                    while (!isFarEnough(newPos, existingPositions) && tries < 50);
-                    const newCubeId = `cube_${Date.now()}_new`;
-                    newCubesState[newCubeId] = newPos;
-
-                    // Den aktualisierten Zustand an ALLE Clients broadcasten
-                    sendRequest('*broadcast*', 'update-cubes', newCubesState);
-                } else {
-                    console.log(`[Client ${clientId}] Cube ${requestedCubeId} already collected or does not exist.`);
-                }
-                break;
-            default:
-                console.log(`[Client ${clientId}] Unknown broadcast command received: ${broadcastCmd}`);
-                break;
+        case '*client-enter*':
+          const newId = data;
+          if(clientId===1 && newId!==1){ sendRequest('*spawn-cubes*', cubePositions); }
+          break;
+        case '*spawn-cubes*':
+          spawnCubesAt(data);
+          break;
+        case '*collect-cube*':
+          const idx = data;
+          if(clientId===1){
+            let newP,tries=0;
+            do{ newP=getRandomPosition(); tries++; }
+            while(!isFarEnough(newP,cubePositions)&&tries<50);
+            cubePositions[idx] = newP;
+            sendRequest('*spawn-cubes*', cubePositions);
           }
-          break; // Ende von case '*broadcast*'
-
-        default:
-            console.log(`[Client ${clientId}] Unknown top-level command received:`, cmd, inc);
-            break;
+          break;
       }
     });
   </script>
