@@ -17,19 +17,14 @@
     <!-- Progress-Bar & Score-Text -->
     <a-entity id="rig" position="0 1.6 0" movement-controls kinematic-body>
       <a-entity camera look-controls wasd-controls>
-        <a-cursor fuse="false" material="color:white;shader:flat"></a-cursor>
+        <!-- Nur mit .spawned raycasten -->
+        <a-cursor fuse="false" material="color:white;shader:flat"
+                  raycaster="objects: .spawned"></a-cursor>
         <a-entity position="0 0 -1.5">
-          <a-plane id="progressBar"
-                   height="0.05" width="0.001"
-                   color="#00FF00"
-                   position="0 -0.1 0"
-                   visible="false"></a-plane>
-          <a-text id="scoreText"
-                  value="Punkte: 0"
-                  color="#000"
-                  align="right"
-                  anchor="right"
-                  width="2"
+          <a-plane id="progressBar" height="0.05" width="0.001"
+                   color="#00FF00" position="0 -0.1 0" visible="false"></a-plane>
+          <a-text id="scoreText" value="Punkte: 0"
+                  color="#000" align="right" anchor="right" width="2"
                   position="2.7 -1 0"></a-text>
         </a-entity>
       </a-entity>
@@ -43,133 +38,177 @@
   <div id="title-display">Hello there!</div>
   <div id="info-display"></div>
 
-  <!-- Dein gesamter JS-Code jetzt hier -->
   <script>
-    // teleport-on-hover (wie gehabt)
-    AFRAME.registerComponent('teleport-on-hover',{ init: function(){
-      const el = this.el;
-      let teleportTimeout, fadeInterval, progressInterval;
-      const progressBar = document.querySelector('#progressBar');
-      function getRandomColorRGB(){ return { r:Math.random()*255|0, g:Math.random()*255|0, b:Math.random()*255|0 }; }
-      function rgbToString(c){ return `rgb(${c.r}, ${c.g}, ${c.b})`; }
-      function lightenColor(c, amt=10){ return { r:Math.min(255,c.r+amt), g:Math.min(255,c.g+amt), b:Math.min(255,c.b+amt) }; }
-      function updateScore(){ document.querySelector('#scoreText').setAttribute('value', `Punkte: ${score}`); }
-      let color = getRandomColorRGB();
-      el.setAttribute('material','color',rgbToString(color));
-      el.addEventListener('mouseenter',()=>{
-        let prog=0;
-        progressBar.setAttribute('width',0.001);
-        progressBar.setAttribute('visible',true);
-        progressInterval = setInterval(()=>{
-          prog+=0.05;
-          progressBar.setAttribute('width',prog);
-        },100);
-        fadeInterval = setInterval(()=>{
-          color = lightenColor(color);
-          el.setAttribute('material','color',rgbToString(color));
-        },300);
-        teleportTimeout = setTimeout(()=>{
-          el.setAttribute('visible',false);
-          progressBar.setAttribute('visible',false);
-          clearInterval(progressInterval);
-          setTimeout(()=>{
-            let x,y,z,d;
-            const minD=1,maxD=10;
-            do {
-              x=(Math.random()-0.5)*20;
-              y=1+Math.random()*3;
-              z=(Math.random()-0.5)*20;
-              d=Math.hypot(x,y-1.6,z);
-            } while(d<minD||d>maxD);
-            color=getRandomColorRGB();
+    // ———————————————————————————————————————————————
+    // teleport-on-hover (unverändert)
+    // ———————————————————————————————————————————————
+    AFRAME.registerComponent('teleport-on-hover', {
+      init: function () {
+        const el = this.el;
+        let teleportTimeout, fadeInterval, progressInterval;
+        const progressBar = document.querySelector('#progressBar');
+        function getRandomColorRGB() {
+          return { r:Math.random()*255|0, g:Math.random()*255|0, b:Math.random()*255|0 };
+        }
+        function rgbToString(c) { return `rgb(${c.r}, ${c.g}, ${c.b})`; }
+        function lightenColor(c, amt=10) {
+          return { r: Math.min(255, c.r+amt), g: Math.min(255, c.g+amt), b: Math.min(255, c.b+amt) };
+        }
+        function updateScore() {
+          document.querySelector('#scoreText')
+                  .setAttribute('value', `Punkte: ${score}`);
+        }
+        let color = getRandomColorRGB();
+        el.setAttribute('material','color',rgbToString(color));
+        el.addEventListener('mouseenter', () => {
+          let prog=0;
+          progressBar.setAttribute('width',0.001);
+          progressBar.setAttribute('visible',true);
+          progressInterval = setInterval(()=>{
+            prog+=0.05;
+            progressBar.setAttribute('width',prog);
+          },100);
+          fadeInterval = setInterval(()=>{
+            color = lightenColor(color);
             el.setAttribute('material','color',rgbToString(color));
-            el.setAttribute('position',`${x} ${y} ${z}`);
-            el.setAttribute('visible',true);
-            score++;
-            updateScore();
-          },1000);
-        },2000);
-      });
-      el.addEventListener('mouseleave',()=>{
-        clearTimeout(teleportTimeout);
-        clearInterval(fadeInterval);
-        clearInterval(progressInterval);
-        progressBar.setAttribute('visible',false);
-      });
-    }});
+          },300);
+          teleportTimeout = setTimeout(()=>{
+            el.setAttribute('visible',false);
+            progressBar.setAttribute('visible',false);
+            clearInterval(progressInterval);
+            setTimeout(()=>{
+              let x,y,z,d;
+              const minD=1,maxD=10;
+              do {
+                x=(Math.random()-0.5)*20;
+                y=1+Math.random()*3;
+                z=(Math.random()-0.5)*20;
+                d=Math.hypot(x,y-1.6,z);
+              } while(d<minD||d>maxD);
+              color = getRandomColorRGB();
+              el.setAttribute('material','color',rgbToString(color));
+              el.setAttribute('position',`${x} ${y} ${z}`);
+              el.setAttribute('visible',true);
+              score++;
+              updateScore();
+            },1000);
+          },2000);
+        });
+        el.addEventListener('mouseleave', () => {
+          clearTimeout(teleportTimeout);
+          clearInterval(fadeInterval);
+          clearInterval(progressInterval);
+          progressBar.setAttribute('visible',false);
+        });
+      }
+    });
 
-    // Hilfs-Funktionen
-    const numCubes=3,minDistOthers=3,minDistCam=3;
-    const camPos={x:0,y:1.6,z:0};
-    function getRandomPosition(){ return { x:(Math.random()-0.5)*10,y:1+Math.random()*2,z:(Math.random()-0.5)*10 }; }
-    function isFarEnough(p,exist){
-      if(Math.hypot(p.x-camPos.x,p.y-camPos.y,p.z-camPos.z)<minDistCam) return false;
-      return exist.every(o=>Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z)>=minDistOthers);
+    // ———————————————————————————————————————————————
+    // Spawn-Hilfsfunktionen
+    // ———————————————————————————————————————————————
+    const numCubes = 3;
+    const minDistOthers = 3, minDistCam = 3;
+    const camPos = { x:0, y:1.6, z:0 };
+    function getRandomPosition() {
+      return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 };
     }
-    function spawnCubesAt(positions){
-      const scene=document.querySelector('a-scene');
+    function isFarEnough(p, arr) {
+      if (Math.hypot(p.x-camPos.x, p.y-camPos.y, p.z-camPos.z) < minDistCam) return false;
+      return arr.every(o=>Math.hypot(p.x-o.x, p.y-o.y, p.z-o.z) >= minDistOthers);
+    }
+    function spawnCubesAt(positions) {
+      const scene = document.querySelector('a-scene');
+      // Alte Würfel entfernen
       document.querySelectorAll('a-box.spawned').forEach(el=>el.remove());
-      positions.forEach(pos=>{
-        const box=document.createElement('a-box');
+      positions.forEach((pos,i) => {
+        const box = document.createElement('a-box');
         box.classList.add('spawned');
         box.setAttribute('teleport-on-hover','');
         box.setAttribute('scale','0.3 0.3 0.3');
         box.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
         box.setAttribute('dynamic-body','');
-        box.setAttribute('animation__mouseenter','property: scale; to: 0.33 0.33 0.33; dur:300; startEvents:mouseenter');
-        box.setAttribute('animation__mouseleave','property: scale; to: 0.3 0.3 0.3; dur:300; startEvents:mouseleave');
-        box.setAttribute('animation__hover',`property: position; dir: alternate; dur:2000; loop:true; to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
+        // Klick-Listener für Collection
+        box.addEventListener('click', ()=> {
+          sendRequest('collect-cube', i);
+        });
+        // Hover-Animation
+        box.setAttribute('animation__mouseenter',
+          'property: scale; to: 0.33 0.33 0.33; dur:300; startEvents:mouseenter');
+        box.setAttribute('animation__mouseleave',
+          'property: scale; to: 0.3 0.3 0.3; dur:300; startEvents:mouseleave');
+        box.setAttribute('animation__hover',
+          `property: position; dir: alternate; dur:2000; loop:true; to: ${pos.x} ${pos.y+0.3} ${pos.z}; easing:easeInOutSine`);
         scene.appendChild(box);
       });
     }
 
-    // WebSocket-Multiplayer
-    const socket=new WebSocket('wss://nosch.uber.space/web-rooms/');
-    let clientId=null,clientCount=0,score=0;
-    let cubePositions=[];
+    // ———————————————————————————————————————————————
+    // WebSocket-Multiplayer mit Collection-Broadcast
+    // ———————————————————————————————————————————————
+    const socket = new WebSocket('wss://nosch.uber.space/web-rooms/');
+    let clientId = null, clientCount = 0, score = 0;
+    let cubePositions = [];
 
-    function sendRequest(...msg){ socket.send(JSON.stringify(msg)); }
+    function sendRequest(...msg) {
+      socket.send(JSON.stringify(msg));
+    }
 
-    socket.addEventListener('open',()=>{
+    socket.addEventListener('open', () => {
       sendRequest('*enter-room*','hello-world');
       sendRequest('*subscribe-client-count*');
       sendRequest('*subscribe-client-enter-exit*');
       setInterval(()=>socket.send(''),30000);
     });
-    socket.addEventListener('close',()=>{ clientId=null; document.body.classList.add('disconnected'); });
 
-    socket.addEventListener('message',(evt)=>{
-      const inc=JSON.parse(evt.data||'[]'),cmd=inc[0];
-      switch(cmd){
+    socket.addEventListener('close', () => {
+      clientId = null;
+      document.body.classList.add('disconnected');
+    });
+
+    socket.addEventListener('message', (evt) => {
+      const inc = JSON.parse(evt.data||'[]'), cmd = inc[0];
+      switch (cmd) {
         case '*client-id*':
-          clientId=inc[1];
-          document.querySelector('#info-display').innerText=`#${clientId}/${clientCount}`;
-          if(clientId===1){
-            cubePositions=[];
-            for(let i=0;i<numCubes;i++){
-              let p,tries=0;
-              do{ p=getRandomPosition(); tries++; }
-              while(!isFarEnough(p,cubePositions)&&tries<50);
+          clientId = inc[1];
+          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
+          if (clientId === 1) {
+            // Master initial spawn
+            cubePositions = [];
+            for (let i=0; i<numCubes; i++) {
+              let p, tries=0;
+              do { p = getRandomPosition(); tries++; }
+              while (!isFarEnough(p, cubePositions) && tries<50);
               cubePositions.push(p);
             }
-            // Master spawnt selbst und sendet
             spawnCubesAt(cubePositions);
-            sendRequest('spawn-cubes',cubePositions);
+            sendRequest('spawn-cubes', cubePositions);
           }
           break;
         case '*client-count*':
-          clientCount=inc[1];
-          document.querySelector('#info-display').innerText=`#${clientId}/${clientCount}`;
+          clientCount = inc[1];
+          document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
           break;
         case '*client-enter*':
-          const newId=inc[1];
-          if(clientId===1 && newId!==1){
-            sendRequest('spawn-cubes',cubePositions);
+          const newId = inc[1];
+          if (clientId === 1 && newId !== 1) {
+            // Neue Clients: sende aktuelle Würfel
+            sendRequest('spawn-cubes', cubePositions);
           }
           break;
         case 'spawn-cubes':
-          if(clientId!==1){
-            spawnCubesAt(inc[1]);
+          // Alle Clients (inkl. Master) spawnen
+          spawnCubesAt(inc[1]);
+          break;
+        case 'collect-cube':
+          const idx = inc[1];
+          // Nur Master entscheidet über Neuposition
+          if (clientId === 1) {
+            let newPos, tries=0;
+            do { newPos = getRandomPosition(); tries++; }
+            while (!isFarEnough(newPos, cubePositions) && tries<50);
+            cubePositions[idx] = newPos;
+            // allen Clients neuen Zustand senden
+            sendRequest('spawn-cubes', cubePositions);
           }
           break;
       }
