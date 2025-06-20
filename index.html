@@ -175,7 +175,7 @@
               } while (!isFarEnough(pos, positions) && tries < 50);
               positions.push(pos);
             }
-            sendRequest('*spawn-cubes*', positions);
+            sendRequest('spawn-cubes', positions);
             spawnCubesAt(positions);
           }
           break;
@@ -183,7 +183,7 @@
           clientCount = inc[1];
           document.querySelector('#info-display').innerText = `#${clientId}/${clientCount}`;
           break;
-        case '*spawn-cubes*':
+        case 'spawn-cubes':
           if (clientId !== 1) {
             spawnCubesAt(inc[1]);
           }
