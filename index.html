@@ -1,28 +1,74 @@
-const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: 8080 });
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VR Cube Game</title>
+  <link rel="icon" href="data:;base64,=">
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-physics-system@3.3.0/dist/aframe-physics-system.min.js"></script>
+</head>
+<body>
+  <a-scene vr-mode-ui="enabled: true" physics="debug: false">
+    <!-- ... rig, cursor, HUD exakt wie vorher ... -->
+  </a-scene>
+  <div id="info-display"></div>
+  <script>
+    // Spawn-Hilfsfunktionen (unverändert)
+    // teleport-on-hover (unverändert)
 
-let cubePositions = generateInitialPositions();
+    // WebSocket–Setup
+    const socket = new WebSocket('wss://nosch.uber.space/web-rooms/');
+    let clientId = null, clientCount = 0, score = 0;
 
-wss.on('connection', ws => {
-  ws.on('message', msg => {
-    const [ cmd, data ] = JSON.parse(msg);
-    switch(cmd) {
-      case 'request-initial-cubes':
-        // nur an den Anfragenden
-        ws.send(JSON.stringify(['spawn-cubes', cubePositions]));
-        break;
-      case 'collect-cube':
-        const idx = data;
-        // neue Position berechnen
-        cubePositions[idx] = randomPositionNotColliding(cubePositions);
-        // an ALLE broadcasten
-        wss.clients.forEach(c => {
-          if (c.readyState === WebSocket.OPEN) {
-            c.send(JSON.stringify(['spawn-cubes', cubePositions]));
-          }
-        });
-        break;
-      // verwalte hier *enter-room* und *subscribe-client-count* etc. nach Bedarf
+    function sendRequest(...msg){ socket.send(JSON.stringify(msg)); }
+
+    // 1) Beim Open: ins Room einsteigen und initialen State anfordern
+    socket.addEventListener('open', () => {
+      sendRequest('*enter-room*','hello-world');
+      sendRequest('*subscribe-client-count*');
+      // eigene Anfrage an den Server, der den aktuellen State liefert
+      sendRequest('request-initial-cubes');
+    });
+
+    // 2) Auf alle Nachrichten reagieren
+    socket.addEventListener('message', evt => {
+      const [ cmd, payload ] = JSON.parse(evt.data||'[]');
+      switch(cmd){
+        case '*client-id*':
+          clientId = payload;
+          document.getElementById('info-display').innerText = `#ID ${clientId}`;
+          break;
+
+        case '*client-count*':
+          clientCount = payload;
+          break;
+
+        // a) Wenn der Server uns den initialen oder aktualisierten State schickt:
+        case 'spawn-cubes':
+          // payload = Array von {x,y,z}
+          spawnCubesAt(payload);
+          break;
+
+        // b) Wenn ein Würfel eingesammelt wurde, ignorieren wir es, 
+        //    denn das führt der Server ja aus und broadcastet dann 'spawn-cubes'.
+        case 'collect-cube':
+          // (könnte Logging sein, muss nicht reagieren)
+          console.log('collect-cube event (server hatte es bekommen)');
+          break;
+      }
+    });
+
+    // 3) Klick auf einen Würfel: nur noch ans Backend senden
+    //    (kein client-side reposition mehr)
+    function setupClickHandlers(boxEl, idx){
+      boxEl.addEventListener('click', () => {
+        sendRequest('collect-cube', idx);
+      });
     }
-  });
-});
+
+    // 4) In spawnCubesAt(...) beim Erzeugen der Boxen
+    //    jeweils setupClickHandlers(box, i) aufrufen statt sendRequest direkt
+  </script>
+</body>
+</html>
