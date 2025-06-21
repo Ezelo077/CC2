@@ -1,7 +1,19 @@
+// server.js
+const express   = require('express');
+const http      = require('http');
+const path      = require('path');
 const WebSocket = require('ws');
-const wss = new WebSocket.Server({ port: 8080 });
+
+const app    = express();
+const server = http.createServer(app);
+const wss    = new WebSocket.Server({ server });
+
 const rooms = {};
 
+// Statisches Frontend ausliefern
+app.use(express.static(path.join(__dirname, 'public')));
+
+// WebSocket-Logik (wie gehabt)
 wss.on('connection', ws => {
   ws.on('message', msg => {
     let arr;
@@ -12,23 +24,25 @@ wss.on('connection', ws => {
       if (!rooms[room]) rooms[room] = [];
       rooms[room].push(ws);
       ws.room = room;
-      ws.id = rooms[room].length;
-      // ID & Count
+      ws.id   = rooms[room].length;
+      // ID & Count senden
       ws.send(JSON.stringify(['*client-id*', ws.id]));
       rooms[room].forEach(c =>
         c.send(JSON.stringify(['*client-count*', rooms[room].length]))
       );
-      // others notify
+      // Anderen mitteilen, dass jemand beigetreten ist
       rooms[room].forEach(c => {
         if (c !== ws)
           c.send(JSON.stringify(['*client-enter*', ws.id]));
       });
     }
     if (['*spawn-cubes*','*collect-cube*'].includes(cmd)) {
-      const list = rooms[ws.room] || [];
-      list.forEach(c => c.send(JSON.stringify([cmd, data])));
+      (rooms[ws.room] || []).forEach(c =>
+        c.send(JSON.stringify([cmd, data]))
+      );
     }
   });
+
   ws.on('close', () => {
     const list = rooms[ws.room] || [];
     rooms[ws.room] = list.filter(c => c !== ws);
@@ -38,3 +52,7 @@ wss.on('connection', ws => {
     });
   });
 });
+
+// Auf Heroku-Port hören
+const PORT = process.env.PORT || 8080;
+server.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
