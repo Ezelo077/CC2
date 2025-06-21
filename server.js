@@ -3,17 +3,23 @@ const express   = require('express');
 const http      = require('http');
 const path      = require('path');
 const WebSocket = require('ws');
++const { Server: IOServer } = require('socket.io');
 
 const app    = express();
 const server = http.createServer(app);
+
+// Dein bestehender WS-Server für Würfel-Sync
 const wss    = new WebSocket.Server({ server });
+
+// Socket.IO für networked-aframe
+const io = new IOServer(server);
 
 const rooms = {};
 
-// Statisches Frontend ausliefern
+// ——— Static files ————————————————————————————————
 app.use(express.static(path.join(__dirname, 'public')));
 
-// WebSocket-Logik (wie gehabt)
+// ——— Dein WebSocket-Code für Würfel ——————————————————
 wss.on('connection', ws => {
   ws.on('message', msg => {
     let arr;
@@ -25,15 +31,12 @@ wss.on('connection', ws => {
       rooms[room].push(ws);
       ws.room = room;
       ws.id   = rooms[room].length;
-      // ID & Count senden
       ws.send(JSON.stringify(['*client-id*', ws.id]));
       rooms[room].forEach(c =>
         c.send(JSON.stringify(['*client-count*', rooms[room].length]))
       );
-      // Anderen mitteilen, dass jemand beigetreten ist
       rooms[room].forEach(c => {
-        if (c !== ws)
-          c.send(JSON.stringify(['*client-enter*', ws.id]));
+        if (c !== ws) c.send(JSON.stringify(['*client-enter*', ws.id]));
       });
     }
     if (['*spawn-cubes*','*collect-cube*'].includes(cmd)) {
@@ -53,6 +56,33 @@ wss.on('connection', ws => {
   });
 });
 
-// Auf Heroku-Port hören
+// ——— Socket.IO für networked-aframe ————————————————————
+io.on('connection', socket => {
+  // Raum beitreten
+  socket.on('join', room => {
+    socket.join(room);
+    // anderen Clients mitteilen, dass jemand dazukommt
+    socket.to(room).emit('clientConnected', socket.id);
+  });
+  // alle Nachrichten (Entity-Updates) broadcasten
+  socket.on('message', data => {
+    // überall senden, außer zurück zum Sender
+    for (const room of socket.rooms) {
+      if (room !== socket.id) {
+        socket.to(room).emit('message', data);
+      }
+    }
+  });
+  // beim Verlassen
+  socket.on('disconnect', () => {
+    for (const room of socket.rooms) {
+      if (room !== socket.id) {
+        socket.to(room).emit('clientDisconnected', socket.id);
+      }
+    }
+  });
+});
+
+// Port starten
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
