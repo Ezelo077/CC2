@@ -1,1 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>VR Cube Game</title>
+  <link rel="icon" href="data:;base64,=">
+  <!-- A-Frame + Environment + Physics -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-environment-component@1.3.1/dist/aframe-environment-component.min.js"></script>
+  <!-- networked-aframe -->
+  <script src="https://cdn.jsdelivr.net/npm/networked-aframe@0.9.0/dist/networked-aframe.min.js"></script>
+</head>
+<body>
+  <!-- Template für entfernte Avatare -->
+  <template id="avatar-template">
+    <a-box
+      depth="0.3" height="1.6" width="0.3"
+      material="color: blue; opacity: 0.6">
+    </a-box>
+  </template>
 
+  <!-- Szene mit networked-aframe -->
+  <a-scene
+    networked-scene="
+      room: hello-world;
+      adapter: socketio;
+    "
+    vr-mode-ui="enabled: true"
+    renderer="physicallyCorrectLights: true">
+
+    <!-- Player-Rig wird nun synchronisiert -->
+    <a-entity
+      id="rig"
+      networked="template: #avatar-template; attachTemplateToLocal: true"
+      position="0 1.6 0"
+      movement-controls
+      kinematic-body>
+      <a-entity camera look-controls wasd-controls>
+        <a-cursor fuse="false" material="color:white;shader:flat" raycaster="objects: .spawned"></a-cursor>
+        <a-entity position="0 0 -1.5">
+          <a-plane id="progressBar" height="0.05" width="0.001" color="#00FF00" visible="false"></a-plane>
+          <a-text id="scoreText" value="Punkte: 0" color="#000" align="right" anchor="right" width="2"></a-text>
+        </a-entity>
+      </a-entity>
+    </a-entity>
+
+    <a-entity environment="preset:forest"></a-entity>
+    <a-light type="ambient" color="#445451"></a-light>
+    <a-light type="point" intensity="2" position="2 4 4"></a-light>
+  </a-scene>
+
+  <div id="info-display" style="position: absolute; top: 10px; left: 10px; color: white;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.5);
+      padding: 5px 10px;
+      border-radius: 4px;
+  "></div>
+
+  <!-- Dein bestehendes WebSocket- und Würfellogik-Script -->
+  <script>
+    // WebSocket für Würfel-Spawn & -Collection
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const socket   = new WebSocket(`${protocol}://${window.location.host}`);
+
+    // --- Component: teleport-on-hover ---
+    AFRAME.registerComponent('teleport-on-hover', {
+      schema: { index: { type: 'int' } },
+      init: function () {
+        const el = this.el;
+        const idx = this.data.index;
+        let timeout, fadeInt, progInt;
+        const progressBar = document.querySelector('#progressBar');
+
+        function getColor(){ return { r: Math.random()*255|0, g: Math.random()*255|0, b: Math.random()*255|0 }; }
+        function toRGB(c){ return `rgb(${c.r}, ${c.g}, ${c.b})`; }
+        function lighten(c, amt=10){ return { r: Math.min(255,c.r+amt), g: Math.min(255,c.g+amt), b: Math.min(255,c.b+amt) }; }
+        function updateScore(){
+          document.querySelector('#scoreText')
+                  .setAttribute('value', `Punkte: ${score}`);
+        }
+
+        let color = getColor();
+        el.setAttribute('material', 'color', toRGB(color));
+
+        el.addEventListener('mouseenter', () => {
+          let prog = 0;
+          progressBar.setAttribute('width', 0.001);
+          progressBar.setAttribute('visible', true);
+          progInt = setInterval(() => {
+            prog += 0.05;
+            progressBar.setAttribute('width', prog);
+          }, 100);
+          fadeInt = setInterval(() => {
+            color = lighten(color);
+            el.setAttribute('material', 'color', toRGB(color));
+          }, 300);
+
+          timeout = setTimeout(() => {
+            clearInterval(progInt);
+            clearInterval(fadeInt);
+            progressBar.setAttribute('visible', false);
+            score++;
+            updateScore();
+            sendRequest('*collect-cube*', idx);
+          }, 2000);
+        });
+
+        el.addEventListener('mouseleave', () => {
+          clearTimeout(timeout);
+          clearInterval(fadeInt);
+          clearInterval(progInt);
+          progressBar.setAttribute('visible', false);
+        });
+      }
+    });
+
+    // --- Spawn Helpers ---
+    const numCubes = 3;
+    const minDist = { cam: 3, others: 3 };
+    const camPos = { x:0, y:1.6, z:0 };
+    function randPos(){ return { x:(Math.random()-0.5)*10, y:1+Math.random()*2, z:(Math.random()-0.5)*10 }; }
+    function okDist(p, arr){
+      if(Math.hypot(p.x-camPos.x,p.y-camPos.y,p.z-camPos.z) < minDist.cam) return false;
+      return arr.every(o => Math.hypot(p.x-o.x,p.y-o.y,p.z-o.z)>=minDist.others);
+    }
+    function spawnCubesAt(positions){
+      const scene = document.querySelector('a-scene');
+      document.querySelectorAll('a-box.spawned').forEach(e=>e.remove());
+      positions.forEach((pos,i) => {
+        const box = document.createElement('a-box');
+        box.classList.add('spawned');
+        box.setAttribute('teleport-on-hover', `index: ${i}`);
+        box.setAttribute('scale','0.3 0.3 0.3');
+        box.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+        scene.appendChild(box);
+      });
+    }
+
+    // --- WebSocket & Game Logic ---
+    let clientId, clientCount = 0, score = 0;
+    let cubePositions = [], lastCount = 0;
+
+    function sendRequest(...m){ socket.send(JSON.stringify(m)); }
+
+    socket.addEventListener('open', () => {
+      sendRequest('*enter-room*', 'hello-world');
+      sendRequest('*subscribe-client-count*');
+      sendRequest('*subscribe-client-enter-exit*');
+      setInterval(()=> socket.send(''), 30000);
+    });
+
+    socket.addEventListener('message', evt => {
+      const [cmd, data] = JSON.parse(evt.data || '[]');
+      switch(cmd){
+        case '*client-id*':
+          clientId = data;
+          document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
+          if(clientId===1){
+            cubePositions = [];
+            for(let i=0;i<numCubes;i++){
+              let p,tries=0;
+              do{ p=randPos(); tries++; } while(!okDist(p,cubePositions)&&tries<50);
+              cubePositions.push(p);
+            }
+            spawnCubesAt(cubePositions);
+            sendRequest('*spawn-cubes*', cubePositions);
+          }
+          break;
+        case '*client-count*':
+          clientCount = data;
+          document.getElementById('info-display').innerText = `#${clientId}/${clientCount}`;
+          if(clientId===1 && clientCount>lastCount) sendRequest('*spawn-cubes*', cubePositions);
+          lastCount = clientCount;
+          break;
+        case '*client-enter*':
+          if(clientId===1 && data!==1) sendRequest('*spawn-cubes*', cubePositions);
+          break;
+        case '*spawn-cubes*':
+          spawnCubesAt(data);
+          break;
+        case '*collect-cube*':
+          if(clientId===1){
+            let p,tries=0;
+            do{ p=randPos(); tries++; } while(!okDist(p, cubePositions)&&tries<50);
+            cubePositions[data] = p;
+            sendRequest('*spawn-cubes*', cubePositions);
+          }
+          break;
+      }
+    });
+  </script>
+</body>
+</html>
