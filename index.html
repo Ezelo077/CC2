@@ -108,7 +108,9 @@
     }
 
     // --- WebSocket & Game Logic ---
-    const socket = new WebSocket('ws://localhost:8080');
+ const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const socket   = new WebSocket(`${protocol}://${window.location.host}`);
+
     let clientId, clientCount = 0, score = 0;
     let cubePositions = [], lastCount = 0;
 
