@@ -3,7 +3,7 @@ const express   = require('express');
 const http      = require('http');
 const path      = require('path');
 const WebSocket = require('ws');
-+const { Server: IOServer } = require('socket.io');
+const { Server: IOServer } = require('socket.io');
 
 const app    = express();
 const server = http.createServer(app);
